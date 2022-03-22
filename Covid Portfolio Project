@@ -1,0 +1,149 @@
+/*DATA EXPLORATION ON WORLD COVID CASES data from (https://ourworldindata.org/covid-deaths)*/
+
+CREATE TABLE covid_deaths (
+iso_code varchar, continent varchar, location varchar,	
+	date date,	population	bigint, total_cases int,
+	new_cases numeric,	new_cases_smoothed numeric,	total_deaths int,
+	new_deaths	numeric, new_deaths_smoothed numeric,	total_cases_per_million numeric,
+	new_cases_per_million numeric, new_cases_smoothed_per_million numeric, 
+	total_deaths_per_million numeric, new_deaths_per_million numeric, 
+	new_deaths_smoothed_per_million	numeric, reproduction_rate numeric,
+	icu_patients numeric, icu_patients_per_million numeric, hosp_patients numeric,
+	hosp_patients_per_million numeric, weekly_icu_admissions numeric, 
+	weekly_icu_admissions_per_million numeric, weekly_hosp_admissions numeric,
+	weekly_hosp_admissions_per_million numeric);
+
+COPY covid_deaths
+FROM 'C:\Program Files\PostgreSQL\Covid_Deaths.csv'
+DELIMITER ','
+CSV HEADER;
+
+SELECT * 
+FROM covid_deaths
+
+-- Covid_Vaccinations TABLE
+
+CREATE TABLE covid_vaccinations (
+	iso_code varchar, continent varchar, location varchar,	date date,
+	total_tests bigint, new_tests int, total_tests_per_thousand numeric, new_tests_per_thousand numeric, 	
+	new_tests_smoothed	int, new_tests_smoothed_per_thousand numeric, positive_rate	numeric,
+	tests_per_case numeric,	tests_units varchar, total_vaccinations bigint, people_vaccinated bigint,
+	people_fully_vaccinated bigint, total_boosters bigint, new_vaccinations bigint,	new_vaccinations_smoothed bigint,	
+	total_vaccinations_per_hundred numeric,	people_vaccinated_per_hundred numeric,	
+	people_fully_vaccinated_per_hundred	numeric, total_boosters_per_hundred numeric,
+	new_vaccinations_smoothed_per_million numeric,	new_people_vaccinated_smoothed	bigint, 
+	new_people_vaccinated_smoothed_per_hundred	numeric, stringency_index numeric,	population bigint,
+	population_density numeric, median_age numeric, aged_65_older numeric, aged_70_older numeric,	
+	gdp_per_capita	numeric, extreme_poverty numeric, cardiovasc_death_rate numeric, 
+	diabetes_prevalence	numeric, female_smokers numeric, male_smokers numeric,	handwashing_facilities	numeric, 
+	hospital_beds_per_thousand	numeric, life_expectancy numeric,	human_development_index	numeric, 
+	excess_mortality_cumulative_absolute numeric, excess_mortality_cumulative numeric, 
+	excess_mortality numeric, excess_mortality_cumulative_per_million numeric
+);
+
+COPY covid_vaccinations
+FROM 'C:\Program Files\PostgreSQL\Covid_Vaccinations.csv'
+DELIMITER ','
+CSV HEADER;
+
+SELECT * 
+FROM covid_vaccinations
+
+--NOW WE BEGIN
+
+--Looking at the Total Cases vs Total Deaths
+--The Death Rate shows the likelihood of one dying if one had covid per country
+
+SELECT location, date, total_cases, total_deaths, CAST(total_deaths AS decimal)/total_cases *100 as death_rate
+FROM covid_deaths
+WHERE location like '%Nigeria%'
+
+
+--Looking at the Total Cases vs Population
+--This shows the percentage of the each country’s population that had covid on each day
+
+SELECT location, date, total_cases, population, CAST(total_cases AS decimal)/population *100 as Infected_population_percentage
+FROM covid_deaths
+WHERE location like '%Nigeria%'
+
+--Countries with highest infection rate
+
+SELECT location, population, MAX(total_cases) AS highest_infection_count,  MAX(CAST(total_cases AS decimal)/population) *100 as percentage_infection_rate
+FROM covid_deaths
+GROUP BY location, population
+ORDER BY percentage_infection_rate DESC
+
+--Countries with highest death count per population
+SELECT location, MAX(total_deaths) AS total_death_count
+FROM covid_deaths
+WHERE continent IS NOT null
+GROUP BY location
+ORDER BY total_death_count DESC --Countries with highest death rate per population
+SELECT location, population, MAX(total_deaths) AS highest_death_count,  MAX(CAST(total_deaths AS decimal)/population) *100 as percentage_death_rate
+FROM covid_deaths
+GROUP BY location, population
+ORDER BY percentage_death_rate DESC
+
+
+--LOOKING AT CONTINENTS
+--Showing continents with highest death_counts
+SELECT continent, MAX(total_deaths) AS total_death_count
+FROM covid_deaths
+WHERE continent IS NOT null
+GROUP BY continent
+ORDER BY total_death_count DESC
+
+--GLOBAL VIEW
+SELECT date, SUM(new_cases) AS Total_confirmed_cases, SUM(new_deaths) AS Total_confirmed_deaths,
+SUM(new_deaths)/NULLIF (SUM(new_cases), 0) AS Death_percentage
+FROM covid_deaths
+WHERE continent IS NOT null
+GROUP BY date
+ORDER BY 1,2
+
+--SUMMARY OF TOTAL_CONFIRMED CASES, TOTAL_CONFIRMED DEATHS AND DEATH_PERCENTAGE ACROSS THE WORLD
+
+SELECT SUM(new_cases) AS Total_confirmed_cases, SUM(new_deaths) AS Total_confirmed_deaths,
+SUM(new_deaths)/NULLIF (SUM(new_cases), 0) AS Death_percentage
+FROM covid_deaths
+WHERE continent IS NOT null
+ORDER BY 1,2
+
+
+--LOOKING AT TOTAL GLOBAL POPULATION VS VACCINATION
+
+CREATE TABLE cummulative_new_vaccinations AS
+SELECT cd.continent, cd.location, cd.date, cd.population, cv.new_vaccinations,
+SUM(cv.new_vaccinations) OVER (PARTITION BY cd.location ORDER BY cd.location, cd.date) AS cummulaive_new_vac,
+SUM(cv.new_vaccinations) OVER (PARTITION BY cd.location ORDER BY cd.location, cd.date) / cd.population as popvsvac
+FROM covid_deaths as cd
+JOIN covid_vaccinations as cv
+ON cd.location = cv.location AND cd.date = cv.date
+WHERE cd.continent IS NOT null
+ORDER BY 2,3;
+
+--Alternative Method
+WITH PopvsVac (continent, location, date, population, new_vaccinations, cummulative_new_vac) AS
+(
+SELECT cd.continent, cd.location, cd.date, cd.population, cv.new_vaccinations,
+SUM(cv.new_vaccinations) OVER (PARTITION BY cd.location ORDER BY cd.location, cd.date) AS cummulaive_new_vac
+FROM covid_deaths as cd
+JOIN covid_vaccinations as cv
+ON cd.location = cv.location AND cd.date = cv.date
+WHERE cd.continent IS NOT null
+ORDER BY 2,3
+)
+SELECT *, (cummulative_new_vac / population) * 100 AS POPVAC
+FROM PopvsVac
+
+--CREATINGS VIEWS FOR LATER USE IN VISUALIZATION
+
+CREATE VIEW percentage_population_vaccinated AS
+SELECT cd.continent, cd.location, cd.date, cd.population, cv.new_vaccinations,
+SUM(cv.new_vaccinations) OVER (PARTITION BY cd.location ORDER BY cd.location, cd.date) AS cummulaive_new_vac,
+SUM(cv.new_vaccinations) OVER (PARTITION BY cd.location ORDER BY cd.location, cd.date) / cd.population as popvsvac
+FROM covid_deaths as cd
+JOIN covid_vaccinations as cv
+ON cd.location = cv.location AND cd.date = cv.date
+WHERE cd.continent IS NOT null
+ORDER BY 2,3;
